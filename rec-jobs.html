@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My Jobs – BeyondMatch</title>
+  <link rel="stylesheet" href="recruiter-matches.css" />
+  <link rel="stylesheet" href="skeleton-loader.css" />
+<style>
+/* ── Apply button as <a> — same look as View Profile → in cand-matches.html ── */
+a.modern-view-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  padding: 8px 16px; border-radius: 8px; cursor: pointer;
+  background: rgba(122,162,255,.12);
+  border: 1px solid rgba(122,162,255,.28);
+  color: #7aa2ff; text-decoration: none;
+  transition: background .18s, border-color .18s;
+}
+a.modern-view-btn:hover {
+  background: rgba(122,162,255,.22);
+  border-color: rgba(122,162,255,.5);
+}
+
+/* ── Source filter tabs ── */
+.source-filter-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.source-filter-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: #4a5580;
+  margin-right: 2px;
+}
+.src-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  padding: 5px 14px; border-radius: 20px; cursor: pointer;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.03);
+  color: #8a9cc8;
+  transition: background .15s, border-color .15s, color .15s;
+  white-space: nowrap;
+}
+.src-tab:hover {
+  background: rgba(122,162,255,.08);
+  border-color: rgba(122,162,255,.25);
+  color: #c5d3ff;
+}
+.src-tab.active-all   { background: rgba(122,162,255,.14); border-color: rgba(122,162,255,.4);  color: #7aa2ff; }
+.src-tab.active-int   { background: rgba(74,222,128,.12);  border-color: rgba(74,222,128,.35);  color: #4ade80; }
+.src-tab.active-ext   { background: rgba(122,162,255,.10); border-color: rgba(122,162,255,.28); color: #7aa2ff; }
+.src-tab .src-count {
+  font-size: 10px; font-weight: 700;
+  border-radius: 10px; padding: 1px 6px; line-height: 1.5;
+  background: rgba(122,162,255,.15); color: #7aa2ff;
+}
+.src-tab.active-int .src-count { background: rgba(74,222,128,.2); color: #4ade80; }
+
+/* ── Location tabs ── */
+.location-tabs-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+  margin-bottom: 24px;
+}
+.loc-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  padding: 6px 14px; border-radius: 20px; cursor: pointer;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.1);
+  color: #8a9cc8;
+  transition: background .15s, border-color .15s, color .15s;
+  white-space: nowrap;
+}
+.loc-tab:hover {
+  background: rgba(122,162,255,.10);
+  border-color: rgba(122,162,255,.3);
+  color: #c5d3ff;
+}
+.loc-tab.active {
+  background: rgba(122,162,255,.18);
+  border-color: rgba(122,162,255,.45);
+  color: #7aa2ff;
+}
+.loc-tab .loc-count {
+  font-size: 10px; font-weight: 700;
+  background: rgba(122,162,255,.18);
+  color: #7aa2ff;
+  border-radius: 10px;
+  padding: 1px 6px;
+  line-height: 1.5;
+}
+.loc-tab.active .loc-count {
+  background: rgba(122,162,255,.3);
+}
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <a href="/rec-jobs.html" style="text-decoration:none;"><h2 class="cand-brand">BeyondMatch</h2></a>
+  <nav class="menu">
+    <a href="rec-dash.html"     class="menu-item">Dashboard</a>
+      <a href="rec-postjob.html"     class="menu-item">Post Job</a>
+    <a href="rec-jobs.html"     class="menu-item active">My Jobs</a>
+    <a href="cand-matches.html" class="menu-item">Candidate Matches</a>
+    <a href="rec-locatehire.html" class="menu-item">CandidateMap</a>
+    <a href="rec-actions.html"  class="menu-item">Recruiter Actions</a>
+    <a href="settings.html"     class="menu-item">Settings</a>
+    <button class="menu-item logout-btn" onclick="unifiedLogout()">⏻ Logout</button>
+  </nav>
+</aside>
+
+<main class="main jobs-modern">
+
+  <div class="page-header-modern">
+    <h1 id="jobsPageTitle">My Jobs</h1>
+    <p>Manage and view posted jobs</p>
+  </div>
+
+  <!-- FILTER BAR -->
+  <div class="jobs-filter-modern">
+    <div class="toggle-modern">
+      <button id="myOrgBtn"   class="toggle-pill active">My Organisation</button>
+      <button id="allJobsBtn" class="toggle-pill secondary">All Jobs</button>
+    </div>
+
+    <select id="locationFilter" class="modern-select">
+      <option value="">All Locations</option>
+    </select>
+
+    <select id="sortSelect" class="modern-select">
+      <option value="newest">Newest</option>
+      <option value="oldest">Oldest</option>
+      <option value="title">Title A–Z</option>
+    </select>
+
+    <input type="text" id="searchInput" class="modern-search input" placeholder="Search job title…" />
+  </div>
+
+  <!-- SOURCE FILTER -->
+  <div class="source-filter-row">
+    <span class="source-filter-label">Source:</span>
+    <button id="srcAllBtn"  class="src-tab active-all" data-src="">All <span id="srcAllCount"  class="src-count">0</span></button>
+    <button id="srcIntBtn"  class="src-tab" data-src="internal">✦ Internal <span id="srcIntCount"  class="src-count">0</span></button>
+    <button id="srcExtBtn"  class="src-tab" data-src="external">⬡ External <span id="srcExtCount"  class="src-count">0</span></button>
+  </div>
+
+  <!-- LOCATION TABS -->
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:24px;">
+    <span class="source-filter-label">Location:</span>
+    <div id="locationTabsRow" class="location-tabs-row" style="margin-bottom:0;margin-top:0;flex:1;"></div>
+  </div>
+
+  <!-- JOBS GRID -->
+  <div class="jobs-grid-wrapper">
+    <div id="jobsTable" class="jobs-grid"></div>
+  </div>
+
+</main>
+
+<!-- Instant skeletons -->
+<script>
+(function() {
+  const grid = document.getElementById('jobsTable');
+  if (!grid) return;
+  function skel() {
+    return `
+      <div class="skeleton-candidate-card">
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div class="skeleton-title" style="width:65%;height:16px;margin-bottom:6px;"></div>
+          <div class="skeleton-subtitle" style="width:40%;height:12px;"></div>
+          <div style="display:flex;gap:6px;">
+            <div class="skeleton-chip"></div>
+            <div class="skeleton-chip" style="width:80px;"></div>
+          </div>
+          <div class="skeleton-subtitle" style="width:30%;height:13px;"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px;">
+            <div class="skeleton-btn"></div>
+            <div class="skeleton-btn"></div>
+          </div>
+        </div>
+      </div>`;
+  }
+  grid.innerHTML = Array(6).fill(null).map(skel).join('');
+})();
+</script>
+
+<script src="skeleton-loader.js"></script>
+<script type="module" src="auth.js"></script>
+<script type="module" src="api.js"></script>
+</body>
+</html>
