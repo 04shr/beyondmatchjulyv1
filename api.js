@@ -149,11 +149,13 @@ export function normalizeApiResponse(res) {
     try {
       const parsed = JSON.parse(res.body);
       if (Array.isArray(parsed)) return parsed;
+      if (parsed.jobs) return parsed.jobs;
       if (parsed.matches) return parsed.matches;
       return [];
     } catch { return []; }
   }
 
+  if (res.jobs) return res.jobs;
   if (res.matches) return res.matches;
   return [];
 }

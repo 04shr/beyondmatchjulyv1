@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Find Leads – BeyondMatch</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="recruiter-matches.css" />
+  <link rel="stylesheet" href="skeleton-loader.css" />
+
+  <!-- Resume parsing (same libraries used elsewhere in the app for PDF/DOCX text extraction) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
+
+<style>
+/* ═══════════════════════════════════════════
+   DESIGN TOKENS — matched to jobmatches.html / resume.html
+═══════════════════════════════════════════ */
+:root {
+  --bg:          #0b0e16;
+  --surface:     #0f1220;
+  --card:        #131726;
+  --card-border: rgba(122,162,255,0.08);
+
+  --blue:        #7aa2ff;
+  --blue-dim:    rgba(122,162,255,0.12);
+  --blue-line:   rgba(122,162,255,0.2);
+
+  --green:       #4ade80;
+  --green-dim:   rgba(34,197,94,0.1);
+
+  --red:         #f87171;
+  --amber:       #fbbf24;
+  --purple:      #c084fc;
+
+  --text-1:      #e2e8f0;
+  --text-2:      #9bb3ff;
+  --text-3:      #88add9;
+
+  --radius-lg:   14px;
+  --radius-md:   10px;
+  --radius-sm:   8px;
+}
+
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+::-webkit-scrollbar { width:5px; height:5px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background:#1e2540; border-radius:10px; }
+::-webkit-scrollbar-thumb:hover { background: var(--blue); }
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--bg);
+  color: var(--text-1);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.main { padding: 32px 32px 48px; }
+
+.page-title { margin-bottom: 22px; }
+.page-title h1 { font-size: 24px; font-weight: 700; letter-spacing:-0.02em; }
+.page-title p  { font-size: 13px; color: var(--text-3); margin-top: 5px; }
+
+/* ── Access denied ── */
+.denied-box {
+  max-width: 520px; margin: 60px auto; text-align:center;
+  background: var(--card); border:1px solid var(--card-border);
+  border-radius: var(--radius-lg); padding: 40px 32px; color: var(--text-3);
+}
+.denied-box h2 { color: var(--text-1); font-size: 18px; margin-bottom: 10px; }
+
+/* ── Resume upload card ── */
+.upload-card {
+  background: var(--card); border:1px solid var(--card-border);
+  border-radius: var(--radius-lg); padding: 20px 24px; margin-bottom: 22px;
+  display:flex; align-items:center; gap:18px; flex-wrap:wrap;
+}
+.upload-card .u-label { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.07em; color:var(--text-2); white-space:nowrap; }
+.upload-row { display:flex; align-items:center; gap:12px; flex:1; min-width:280px; flex-wrap:wrap; }
+
+input[type="file"] {
+  font-family: inherit; font-size:12.5px; color: var(--text-3);
+  max-width: 260px;
+}
+input[type="file"]::file-selector-button {
+  font-family: inherit; font-size:12px; font-weight:600;
+  background: var(--blue-dim); border:1px solid var(--blue-line);
+  color: var(--blue); border-radius: var(--radius-sm); padding:7px 14px;
+  cursor:pointer; margin-right:10px; transition: background .15s;
+}
+input[type="file"]::file-selector-button:hover { background: rgba(122,162,255,.2); }
+
+.btn-primary {
+  background: var(--blue); color:#080c18; border:none;
+  border-radius: var(--radius-sm); font-family: inherit; font-size:13px;
+  font-weight:700; padding:9px 20px; cursor:pointer; white-space:nowrap;
+  transition: opacity .15s, transform .1s;
+}
+.btn-primary:hover { opacity:.88; transform: translateY(-1px); }
+.btn-primary:disabled { opacity:.45; cursor:not-allowed; transform:none; }
+
+.btn-ghost {
+  background: transparent; border:1px solid rgba(122,162,255,.2); color: var(--blue);
+  border-radius: var(--radius-sm); font-family: inherit; font-size:12.5px;
+  font-weight:600; padding:8px 16px; cursor:pointer; white-space:nowrap;
+  transition: background .15s;
+}
+.btn-ghost:hover { background: rgba(122,162,255,.1); }
+
+.upload-status { font-size:12.5px; color: var(--text-3); }
+.upload-status.ok   { color: var(--green); }
+.upload-status.err  { color: var(--red); }
+
+/* ── Toolbar ── */
+.leads-toolbar {
+  display:flex; justify-content:space-between; align-items:center;
+  flex-wrap:wrap; gap:12px; margin-bottom:18px;
+}
+.leads-toolbar h3 { font-size:15px; font-weight:600; }
+.leads-count { font-size:12px; color: var(--text-3); margin-top:2px; }
+
+.toggle-modern { display:flex; gap:4px; background:#0d1018; padding:4px; border-radius:10px; border:1px solid rgba(122,162,255,.1); }
+.toggle-pill {
+  font-family: inherit; font-size:12px; font-weight:600; padding:6px 14px;
+  border-radius:7px; border:none; background:transparent; color:#6b7fa8; cursor:pointer;
+  transition: background .15s, color .15s;
+}
+.toggle-pill.active { background: var(--blue-dim); color: var(--blue); }
+
+.lead-filters { display:flex; gap:10px; flex-wrap:wrap; }
+select {
+  background:#0d1018; border:1px solid rgba(122,162,255,.14);
+  border-radius: var(--radius-sm); color: var(--text-1); font-family:inherit;
+  font-size:12px; padding:7px 28px 7px 10px; outline:none; cursor:pointer;
+  appearance:none; -webkit-appearance:none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%234a5580' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat:no-repeat; background-position: right 10px center;
+}
+select:focus { border-color: rgba(122,162,255,.4); }
+
+.search-wrap { position:relative; }
+.search-wrap input {
+  background: rgba(122,162,255,.05); border:1px solid rgba(122,162,255,.12);
+  border-radius:10px; padding:8px 14px 8px 32px; font-family:inherit; font-size:13px;
+  color: var(--text-1); outline:none; width:200px;
+}
+.search-wrap svg { position:absolute; left:10px; top:50%; transform:translateY(-50%); }
+
+/* ── Grid + card (mirrors jobmatches.html match-card design) ── */
+.leads-grid {
+  display:grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap:16px;
+}
+.lead-card {
+  background: var(--card); border:1px solid var(--card-border); border-radius: var(--radius-lg);
+  padding:18px 20px; display:flex; flex-direction:column; position:relative; overflow:hidden;
+  transition: transform .2s, border-color .2s, box-shadow .2s;
+  animation: fadeUp .35s ease both;
+}
+@keyframes fadeUp { from{opacity:0; transform:translateY(12px);} to{opacity:1; transform:none;} }
+.lead-card::before {
+  content:''; position:absolute; inset:0; pointer-events:none;
+  background: radial-gradient(ellipse at top left, rgba(122,162,255,0.04), transparent 60%);
+}
+.lead-card:hover { transform: translateY(-3px); border-color: rgba(122,162,255,.22); box-shadow:0 12px 32px rgba(0,0,0,.4); }
+.lead-card.top-match { border-color: rgba(122,162,255,.3); box-shadow:0 0 0 1px rgba(122,162,255,.12), 0 8px 24px rgba(122,162,255,.08); }
+
+.lead-header { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:10px; }
+.lead-title { font-size:15px; font-weight:600; color: var(--text-1); line-height:1.3; }
+.lead-sub   { font-size:11.5px; color: var(--text-2); margin-top:4px; }
+
+.match-ring { position:relative; width:44px; height:44px; flex-shrink:0; }
+.match-ring svg { width:44px; height:44px; transform:rotate(-90deg); }
+.match-ring .ring-bg   { fill:none; stroke:#1b2140; stroke-width:4; }
+.match-ring .ring-fill { fill:none; stroke-width:4; stroke-linecap:round; stroke-dasharray:113; transform-box:fill-box; transform-origin:center; transition: stroke-dashoffset 1s cubic-bezier(.34,1.56,.64,1); }
+.match-ring-label { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color: var(--text-1); }
+
+.lead-meta { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+.meta-chip {
+  font-size:11px; color: var(--text-1); background: rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.06); border-radius:6px; padding:3px 8px;
+}
+.lead-budget { font-size:13px; font-weight:600; color: var(--green); margin-bottom:10px; }
+.lead-desc {
+  font-size:12px; color: var(--text-3); line-height:1.55; margin-bottom:14px; flex:1;
+  display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;
+}
+.top-badge {
+  display:inline-flex; align-items:center; gap:4px; font-size:9px; font-weight:700;
+  text-transform:uppercase; letter-spacing:.08em; color: var(--amber);
+  background: rgba(251,191,36,.08); border:1px solid rgba(251,191,36,.2);
+  border-radius:5px; padding:2px 7px; margin-bottom:10px; align-self:flex-start;
+}
+
+.lead-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:auto; }
+.lead-btn {
+  display:flex; align-items:center; justify-content:center; gap:5px; height:34px;
+  font-family:inherit; font-size:11.5px; font-weight:600; border-radius: var(--radius-sm);
+  border:1px solid transparent; cursor:pointer; text-decoration:none; transition:all .2s; white-space:nowrap;
+}
+.lead-btn.open {
+  background: linear-gradient(135deg, rgba(122,162,255,.2), rgba(122,162,255,.1));
+  border-color: rgba(122,162,255,.3); color: var(--blue);
+}
+.lead-btn.open:hover { background: var(--blue); color:#080c18; border-color: var(--blue); }
+.lead-btn.copy {
+  background: rgba(74,222,128,.08); border-color: rgba(74,222,128,.2); color: var(--green);
+}
+.lead-btn.copy:hover { background: rgba(74,222,128,.16); border-color: rgba(74,222,128,.4); }
+.lead-btn.copy.copied { background: rgba(74,222,128,.18); }
+
+.lead-insight {
+  font-size:12px; color:#9bb3ff; background: rgba(122,162,255,.06);
+  border:1px solid rgba(122,162,255,.12); border-radius:7px; padding:7px 10px;
+  line-height:1.5; margin-bottom:10px; display:none;
+}
+.lead-btn.know {
+  background: rgba(192,132,252,.08); border-color: rgba(192,132,252,.2); color: var(--purple);
+  grid-column: 1 / -1;
+}
+.lead-btn.know:hover { background: rgba(192,132,252,.16); border-color: rgba(192,132,252,.4); }
+
+/* ── Empty / skeleton ── */
+.empty-state { grid-column:1/-1; padding:48px 24px; text-align:center; color: var(--text-3); }
+.empty-state h4 { font-size:15px; font-weight:600; color: var(--text-1); margin-bottom:6px; }
+
+.skeleton-lead-card { background: var(--card); border:1px solid var(--card-border); border-radius: var(--radius-lg); padding:18px 20px; display:flex; flex-direction:column; gap:10px; }
+@keyframes shimmer { 0%{background-position:-600px 0;} 100%{background-position:600px 0;} }
+.skel { border-radius:6px; background:linear-gradient(90deg,#1a2035 25%,#202840 50%,#1a2035 75%); background-size:600px 100%; animation:shimmer 1.4s infinite linear; }
+.skel-h20{height:20px;} .skel-h14{height:14px;} .skel-h34{height:34px;border-radius:var(--radius-sm);}
+.skel-w60{width:60%;} .skel-w40{width:40%;} .skel-w80{width:80%;}
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <a href="/rec-dash.html" style="text-decoration:none;"><h2 class="cand-brand">BeyondMatch</h2></a>
+  <nav class="menu">
+    <a href="rec-dash.html"       class="menu-item">Dashboard</a>
+    <a href="rec-postjob.html"    class="menu-item">Post Job</a>
+    <a href="rec-jobs.html"       class="menu-item">My Jobs</a>
+    <a href="cand-matches.html"   class="menu-item">Candidate Matches</a>
+    <a href="rec-locatehire.html" class="menu-item">CandidateMap</a>
+    <a href="rec-leads.html"      class="menu-item active">Find Leads</a>
+    <a href="rec-actions.html"    class="menu-item">Recruiter Actions</a>
+    <a href="settings.html"       class="menu-item">Settings</a>
+    <button class="menu-item logout-btn" onclick="unifiedLogout()">⏻ Logout</button>
+  </nav>
+</aside>
+
+<main class="main">
+
+  <div class="page-title">
+    <h1>Find Leads</h1>
+    <p>Freelance projects pulled in from Freelancer.com — upload a resume to see which ones fit best.</p>
+  </div>
+
+  <!-- ACCESS-DENIED (shown only if the signed-in recruiter isn't Beyond Match) -->
+  <div id="deniedBox" class="denied-box" style="display:none;">
+    <h2>This page isn't available for your account</h2>
+    <p>Find Leads is currently limited to a specific organisation.</p>
+  </div>
+
+  <!-- MAIN CONTENT (hidden until access is confirmed) -->
+  <div id="leadsContent" style="display:none;">
+
+    <!-- RESUME UPLOAD -->
+    <div class="upload-card">
+      <div class="u-label">Check A Resume</div>
+      <div class="upload-row">
+        <input type="file" id="resumeFile" accept=".pdf,.docx" />
+        <button class="btn-primary" id="analyzeBtn" onclick="window.analyzeResumeAgainstLeads()">Analyze Resume</button>
+        <button class="btn-ghost" id="clearBtn" onclick="window.clearResumeMatching()" style="display:none;">Clear</button>
+        <span class="upload-status" id="uploadStatus"></span>
+      </div>
+    </div>
+
+    <!-- TOOLBAR -->
+    <div class="leads-toolbar">
+      <div>
+        <h3>Freelance Leads</h3>
+        <div class="leads-count" id="leadsCount"></div>
+      </div>
+
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+        <div class="toggle-modern" id="viewToggle">
+          <button class="toggle-pill active" data-view="all">All Leads</button>
+          <button class="toggle-pill" data-view="matched" id="matchedToggleBtn" disabled title="Upload a resume to enable">Matched Only</button>
+        </div>
+
+        <div class="search-wrap">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4a5580" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input type="text" id="leadSearch" placeholder="Search leads…" />
+        </div>
+
+        <div class="lead-filters">
+          <select id="matchFilter" disabled>
+            <option value="">All Match %</option>
+            <option value="50">50%+</option>
+            <option value="60">60%+</option>
+            <option value="70">70%+</option>
+          </select>
+          <select id="budgetSort">
+            <option value="">Sort by Budget</option>
+            <option value="high">High → Low</option>
+            <option value="low">Low → High</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- GRID -->
+    <div id="leadsGrid" class="leads-grid"></div>
+
+  </div>
+
+</main>
+
+<script type="module" src="auth.js"></script>
+<script type="module" src="api.js"></script>
+
+<script type="module">
+import { auth, db } from "./auth.js";
+import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+import { callGemini } from "./gemini.js";
+
+/* ── Instant skeletons while we wait on auth + jobs ── */
+(function skeletons() {
+  const grid = document.getElementById("leadsGrid");
+  const skel = () => `
+    <div class="skeleton-lead-card">
+      <div class="skel skel-h20 skel-w60"></div>
+      <div class="skel skel-h14 skel-w40"></div>
+      <div class="skel skel-h14 skel-w80"></div>
+      <div class="skel skel-h34"></div>
+    </div>`;
+  grid.innerHTML = Array(6).fill(null).map(skel).join("");
+})();
+
+/* ── State ── */
+let allLeads      = [];          // raw freelancer-source jobs from /jobs
+let resumeTokens   = null;       // Set<string> once a resume has been analyzed
+let activeView     = "all";      // "all" | "matched"
+const STOPWORDS = new Set(["the","and","for","with","this","that","from","have","will","your","you","are","not","but","all","any","can","our","was","were","has","had","its","a","an","of","to","in","on","at","is","be","as","by","or","if","we","i","your","you're","i'm"]);
+
+function tokenize(text) {
+  return (text || "").toLowerCase().match(/[a-z][a-z0-9+.#]{1,}/g) || [];
+}
+
+// Simple, transparent keyword-overlap score (no backend call needed) —
+// looks at what fraction of the meaningful words in the lead's title +
+// description also appear in the uploaded resume text.
+function scoreLead(lead) {
+  if (!resumeTokens) return null;
+  const jobTokens = tokenize(`${lead.title || ""} ${lead.description || ""}`)
+    .filter(t => !STOPWORDS.has(t) && t.length > 2);
+  if (!jobTokens.length) return 0;
+  const jobSet = new Set(jobTokens);
+  let overlap = 0;
+  jobSet.forEach(t => { if (resumeTokens.has(t)) overlap++; });
+  const pct = Math.round((overlap / jobSet.size) * 100);
+  return Math.min(98, Math.max(2, pct));
+}
+
+/* ── Resume parsing (mirrors auth.js's signup-time parsing) ── */
+async function parsePDF(file) {
+  const buffer = await file.arrayBuffer();
+  const pdf = await window.pdfjsLib.getDocument({ data: buffer }).promise;
+  let text = "";
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    text += content.items.map(x => x.str).join(" ") + "\n";
+  }
+  return text;
+}
+async function parseDOCX(file) {
+  const buffer = await file.arrayBuffer();
+  const result = await window.mammoth.extractRawText({ arrayBuffer: buffer });
+  return result.value;
+}
+
+window.analyzeResumeAgainstLeads = async function () {
+  const fileInput = document.getElementById("resumeFile");
+  const statusEl  = document.getElementById("uploadStatus");
+  const file = fileInput.files?.[0];
+
+  if (!file) {
+    statusEl.textContent = "Choose a PDF or DOCX file first.";
+    statusEl.className = "upload-status err";
+    return;
+  }
+
+  const btn = document.getElementById("analyzeBtn");
+  btn.disabled = true;
+  btn.textContent = "Analyzing…";
+  statusEl.textContent = "";
+  statusEl.className = "upload-status";
+
+  try {
+    let text = "";
+    if (file.name.toLowerCase().endsWith(".pdf")) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      text = await parsePDF(file);
+    } else if (file.name.toLowerCase().endsWith(".docx")) {
+      text = await parseDOCX(file);
+    } else {
+      throw new Error("Unsupported file type — please upload a .pdf or .docx");
+    }
+
+    if (!text.trim()) throw new Error("Couldn't extract any text from that file.");
+
+    resumeTokens = new Set(tokenize(text).filter(t => !STOPWORDS.has(t) && t.length > 2));
+
+    statusEl.textContent = `✓ Resume analyzed — ${allLeads.length} leads scored`;
+    statusEl.className = "upload-status ok";
+
+    document.getElementById("matchedToggleBtn").disabled = false;
+    document.getElementById("matchedToggleBtn").title = "";
+    document.getElementById("matchFilter").disabled = false;
+    document.getElementById("clearBtn").style.display = "inline-flex";
+
+    renderLeads();
+  } catch (err) {
+    statusEl.textContent = `✕ ${err.message}`;
+    statusEl.className = "upload-status err";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Analyze Resume";
+  }
+};
+
+window.clearResumeMatching = function () {
+  resumeTokens = null;
+  activeView = "all";
+  document.querySelectorAll("#viewToggle .toggle-pill").forEach(b => b.classList.remove("active"));
+  document.querySelector('#viewToggle [data-view="all"]').classList.add("active");
+  document.getElementById("matchedToggleBtn").disabled = true;
+  document.getElementById("matchedToggleBtn").title = "Upload a resume to enable";
+  document.getElementById("matchFilter").disabled = true;
+  document.getElementById("matchFilter").value = "";
+  document.getElementById("clearBtn").style.display = "none";
+  document.getElementById("uploadStatus").textContent = "";
+  document.getElementById("resumeFile").value = "";
+  renderLeads();
+};
+
+/* ── Card rendering ── */
+function ringColor(pct) {
+  if (pct >= 70) return "#4ade80";
+  if (pct >= 50) return "#7aa2ff";
+  return "#fbbf24";
+}
+
+function leadCard(lead, idx) {
+  const pct = scoreLead(lead);
+  const hasScore = pct !== null;
+  const isTop = hasScore && pct >= 70;
+
+  const dashOffset = hasScore ? (113 - (113 * pct) / 100) : 113;
+  const ringHTML = hasScore ? `
+    <div class="match-ring">
+      <svg viewBox="0 0 44 44">
+        <circle class="ring-bg" cx="22" cy="22" r="18"/>
+        <circle class="ring-fill" cx="22" cy="22" r="18" stroke="${ringColor(pct)}"
+          stroke-dashoffset="${dashOffset}"/>
+      </svg>
+      <div class="match-ring-label">${pct}%</div>
+    </div>` : "";
+
+  const budget = (lead.salary_min || lead.salary_max)
+    ? `Avg Bid: $${Math.round(lead.salary_min || lead.salary_max).toLocaleString()}`
+    : "Budget not disclosed";
+
+  const desc = (lead.description || "").slice(0, 220);
+  const applyUrl = lead.apply_url || lead.redirect_url || "";
+
+  return `
+    <div class="lead-card ${isTop ? "top-match" : ""}" data-idx="${idx}">
+      ${isTop ? `<div class="top-badge">★ Strong Match</div>` : ""}
+      <div class="lead-header">
+        <div>
+          <div class="lead-title">${escHtml(lead.title || "Untitled Project")}</div>
+          <div class="lead-sub">Freelancer.com · Remote</div>
+        </div>
+        ${ringHTML}
+      </div>
+      <div class="lead-meta">
+        <span class="meta-chip">📍 Remote</span>
+      </div>
+      <div class="lead-budget">${budget}</div>
+      <div class="lead-desc">${escHtml(desc)}${(lead.description || "").length > 220 ? "…" : ""}</div>
+      <div class="lead-insight" id="insight-${idx}"></div>
+      <div class="lead-actions">
+        <a class="lead-btn open" href="${applyUrl || "#"}" target="_blank" rel="noopener"
+           ${!applyUrl ? "onclick=\"return false;\" style=\"opacity:.5;cursor:not-allowed;\"" : ""}>
+          🔗 Open Project
+        </a>
+        <button class="lead-btn copy" onclick="window.copyLeadLink(${idx}, this)">📋 Copy Link</button>
+        <button class="lead-btn know" onclick="window.knowMoreAboutLead(${idx}, this)">✨ Know More</button>
+      </div>
+    </div>`;
+}
+
+function escHtml(s) {
+  return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+window.copyLeadLink = function (idx, btn) {
+  const lead = allLeads[idx];
+  const url = lead.apply_url || lead.redirect_url || "";
+  if (!url) return;
+  navigator.clipboard?.writeText(url).then(() => {
+    const original = btn.textContent;
+    btn.textContent = "✓ Copied";
+    btn.classList.add("copied");
+    setTimeout(() => { btn.textContent = original; btn.classList.remove("copied"); }, 1800);
+  });
+};
+
+window.knowMoreAboutLead = async function (idx, btn) {
+  const lead = allLeads[idx];
+  const box = document.getElementById(`insight-${idx}`);
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = "Thinking…";
+  box.style.display = "block";
+  box.textContent = "Generating a quick summary…";
+
+  const prompt = `In 2 short sentences, summarize this freelance project for a recruiter deciding whether to bid on it, and note what kind of freelancer would be a good fit. Title: "${lead.title}". Description: "${(lead.description || "").slice(0, 500)}"`;
+
+  try {
+    const result = await callGemini(prompt, "candidate_analysis");
+    box.textContent = result || "Couldn't generate a summary right now.";
+  } catch {
+    box.textContent = "Couldn't generate a summary right now.";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+};
+
+/* ── Filtering / sorting / rendering ── */
+function renderLeads() {
+  const grid = document.getElementById("leadsGrid");
+  let filtered = [...allLeads];
+
+  const searchTerm = document.getElementById("leadSearch").value.trim().toLowerCase();
+  if (searchTerm) {
+    filtered = filtered.filter(l =>
+      (l.title || "").toLowerCase().includes(searchTerm) ||
+      (l.description || "").toLowerCase().includes(searchTerm));
+  }
+
+  if (activeView === "matched" && resumeTokens) {
+    filtered = filtered.filter(l => (scoreLead(l) ?? 0) > 0);
+  }
+
+  const matchMin = document.getElementById("matchFilter").value;
+  if (matchMin && resumeTokens) {
+    filtered = filtered.filter(l => (scoreLead(l) ?? 0) >= Number(matchMin));
+  }
+
+  if (resumeTokens) {
+    filtered.sort((a, b) => (scoreLead(b) ?? 0) - (scoreLead(a) ?? 0));
+  }
+
+  const budgetSort = document.getElementById("budgetSort").value;
+  if (budgetSort === "high") {
+    filtered.sort((a, b) => (Number(b.salary_min || b.salary_max || 0)) - (Number(a.salary_min || a.salary_max || 0)));
+  } else if (budgetSort === "low") {
+    filtered.sort((a, b) => (Number(a.salary_min || a.salary_max || 0)) - (Number(b.salary_min || b.salary_max || 0)));
+  }
+
+  document.getElementById("leadsCount").textContent =
+    `${filtered.length} of ${allLeads.length} lead${allLeads.length === 1 ? "" : "s"}`;
+
+  if (!filtered.length) {
+    grid.innerHTML = `
+      <div class="empty-state">
+        <h4>No leads match right now</h4>
+        <p>Try clearing filters or search.</p>
+      </div>`;
+    return;
+  }
+
+  // Map back to original indices so card action handlers (copy/know-more)
+  // reference the right entry in allLeads regardless of filtering/sorting.
+  grid.innerHTML = filtered.map(lead => {
+    const originalIdx = allLeads.indexOf(lead);
+    return leadCard(lead, originalIdx);
+  }).join("");
+}
+
+document.getElementById("leadSearch").addEventListener("input", renderLeads);
+document.getElementById("matchFilter").addEventListener("change", renderLeads);
+document.getElementById("budgetSort").addEventListener("change", renderLeads);
+document.getElementById("viewToggle").addEventListener("click", (e) => {
+  const btn = e.target.closest(".toggle-pill");
+  if (!btn || btn.disabled) return;
+  document.querySelectorAll("#viewToggle .toggle-pill").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  activeView = btn.dataset.view;
+  renderLeads();
+});
+
+/* ── Boot: gate access, then fetch + render leads ── */
+onAuthStateChanged(auth, async (user) => {
+  if (!user) return;
+
+  const BEYOND_MATCH_UID = "z2Hn9OTvGkP29wsAGdJjbSaHvlt1"; // recruiter_id / uid for the Beyond Match account
+
+  const snap = await getDoc(doc(db, "users", user.uid));
+  const userData = snap.exists() ? snap.data() : {};
+  const eligible = window._isBeyondMatchRecruiter
+    ? window._isBeyondMatchRecruiter(userData, user.uid)
+    : (userData.role === "recruiter" && user.uid === BEYOND_MATCH_UID);
+
+  if (!eligible) {
+    document.getElementById("deniedBox").style.display = "block";
+    return;
+  }
+
+  document.getElementById("leadsContent").style.display = "block";
+
+  try {
+    const jobs = (typeof window.fetchJobs === "function")
+      ? await window.fetchJobs()
+      : [];
+    allLeads = jobs.filter(j => (j.source || "").toLowerCase() === "freelancer");
+  } catch {
+    allLeads = [];
+  }
+
+  renderLeads();
+});
+</script>
+</body>
+</html>

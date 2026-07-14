@@ -126,6 +126,50 @@ onAuthStateChanged(auth, async (user) => {
 
 
 /* =========================================================
+   FIND LEADS ACCESS — single source of truth
+   Only this one recruiter account should ever see/use the
+   "Find Leads" page. Exposed on window so rec-leads.html's own
+   access gate uses the exact same rule (no duplicated UID).
+========================================================= */
+const BEYOND_MATCH_UID = "z2Hn9OTvGkP29wsAGdJjbSaHvlt1";
+
+window._isBeyondMatchRecruiter = function (userData, uid) {
+  return !!userData && userData.role === "recruiter" && uid === BEYOND_MATCH_UID;
+};
+
+function _whenDomReady(fn) {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", fn, { once: true });
+  } else {
+    fn();
+  }
+}
+
+/* =========================================================
+   FIND LEADS SIDEBAR VISIBILITY
+   Runs on every page (auth.js is loaded everywhere) and removes
+   the "Find Leads" nav link unless the signed-in user is the
+   Beyond Match recruiter account. Fails closed: if we can't
+   confirm eligibility for any reason, the link is hidden.
+========================================================= */
+onAuthStateChanged(auth, async (user) => {
+  const hideLeadsLink = () => _whenDomReady(() => {
+    document.querySelectorAll('a[href="rec-leads.html"]').forEach(el => el.remove());
+  });
+
+  if (!user) { hideLeadsLink(); return; }
+
+  try {
+    const snap     = await getDoc(doc(db, "users", user.uid));
+    const userData = snap.exists() ? snap.data() : {};
+    if (!window._isBeyondMatchRecruiter(userData, user.uid)) hideLeadsLink();
+  } catch {
+    hideLeadsLink();
+  }
+});
+
+
+/* =========================================================
    LOGOUT
 ========================================================= */
 window.unifiedLogout = async function () {
