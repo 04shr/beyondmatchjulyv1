@@ -518,6 +518,7 @@ async function loadRecruiterJobs() {
 
   renderRecruiterJobs();
   populateLocationFilter();
+  populateProviderFilter();
   // Refresh source count badges after data is loaded
   const _el = id => document.getElementById(id);
   const _intC = orgJobs.filter(j => j._source === 'internal').length;
@@ -533,6 +534,25 @@ function getJobLocation(job) {
     job.location ||
     (job.city && job.country ? `${job.city}, ${job.country}` : job.country || null)
   );
+}
+
+// Resolves which external job-board API a job came from.
+// Confirmed from live API response: the field is `source` — values seen so
+// far: "adzuna", "freelancer", "arbeitnow", "remoteok", plus "beyondmatch"
+// for internally-posted jobs (which we treat as no provider / internal).
+const PROVIDER_DISPLAY_NAMES = {
+  adzuna:    "Adzuna",
+  freelancer:"Freelancer",
+  arbeitnow: "Arbeitnow",
+  remoteok:  "RemoteOK",
+};
+
+function getJobProvider(job) {
+  const raw = job.source;
+  if (!raw || typeof raw !== "string") return null;
+  const key = raw.trim().toLowerCase();
+  if (!key || key === "beyondmatch" || key === "internal") return null;
+  return PROVIDER_DISPLAY_NAMES[key] || (key.charAt(0).toUpperCase() + key.slice(1));
 }
 
 // Returns a clean pill label: country (+ REMOTE if applicable)
@@ -571,6 +591,11 @@ function renderRecruiterJobs() {
     filtered = filtered.filter(j => j._source === activeSourceFilter);
   }
 
+  // Provider filter — narrows external jobs down to a specific source API (e.g. Adzuna)
+  if (activeProviderFilter) {
+    filtered = filtered.filter(j => j._source === "external" && getJobProvider(j) === activeProviderFilter);
+  }
+
   const searchTerm = document.getElementById("searchInput")?.value.toLowerCase() || "";
   if (searchTerm) {
     filtered = filtered.filter(j => j.title?.toLowerCase().includes(searchTerm));
@@ -603,6 +628,7 @@ function renderRecruiterJobs() {
     const isInternal  = job._source === "internal";
 
     // Source badge — shown in top-right next to the location pill
+    const jobProvider = !isInternal ? getJobProvider(job) : null;
     const sourceBadge = isInternal
       ? `<span style="
             font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;
@@ -614,12 +640,33 @@ function renderRecruiterJobs() {
             font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;
             padding:3px 8px;border-radius:10px;white-space:nowrap;
             background:rgba(122,162,255,.10);border:1px solid rgba(122,162,255,.22);color:#7aa2ff;">
-           ⬡ External
+           ⬡ External${jobProvider ? ` · ${jobProvider}` : ""}
          </span>`;
 
     // Internal cards get a subtle green left-border accent
     const cardAccent = isInternal
       ? "border-left:3px solid rgba(74,222,128,.35);"
+      : "";
+
+    // Short description snippet (strip any HTML, trim, truncate)
+    const rawDesc  = (job.description || job.jd || "").replace(/<[^>]*>/g, "").trim();
+    const descHTML = rawDesc
+      ? `<p class="job-modern-desc" style="font-size:12.5px;line-height:1.5;color:#8a9cc8;margin:2px 0 10px;">
+           ${rawDesc.slice(0, 130)}${rawDesc.length > 130 ? "…" : ""}
+         </p>`
+      : "";
+
+    // External jobs carry an outbound apply link in `apply_url` (confirmed from live API data)
+    const externalLink = !isInternal ? (job.apply_url || null) : null;
+
+    const applyBtn = externalLink
+      ? `<a class="modern-view-btn"
+           href="${externalLink}"
+           target="_blank"
+           rel="noopener noreferrer"
+           style="background:rgba(74,222,128,.10);border-color:rgba(74,222,128,.28);color:#4ade80;">
+          View Job ↗
+        </a>`
       : "";
 
     return `
@@ -633,6 +680,7 @@ function renderRecruiterJobs() {
       </div>
       <div class="job-modern-company">${job.company || "-"}</div>
       <div class="job-modern-salary">${formatSalary(job)}</div>
+      ${descHTML}
       <div class="job-modern-actions">
         <a class="modern-view-btn"
            href="${matchesHref}"
@@ -644,6 +692,7 @@ function renderRecruiterJobs() {
            style="background:rgba(192,132,252,.10);border-color:rgba(192,132,252,.25);color:#c084fc;">
           + Post Similar
         </a>
+        ${applyBtn}
       </div>
     </div>`;
   }).join("");
@@ -816,6 +865,7 @@ function getRegionLabel(loc) {
 
 let activeLocationTab = ""; // "" = All
 let activeSourceFilter  = ""; // "" = All, "internal", "external"
+let activeProviderFilter = ""; // "" = All providers; else a specific external API name e.g. "Adzuna"
 
 function populateLocationFilter() {
   const select  = document.getElementById("locationFilter");
@@ -919,6 +969,58 @@ function populateLocationFilter() {
   });
 }
 
+// Builds provider tabs (e.g. "Adzuna", "Reed") for external jobs so recruiters
+// can filter down to a specific source API. Hidden entirely if no external job
+// carries a resolvable provider name.
+function populateProviderFilter() {
+  const wrap    = document.getElementById("providerTabsWrap");
+  const tabsRow = document.getElementById("providerTabsRow");
+  if (!wrap || !tabsRow) return;
+
+  const sourceJobs = (showAll ? allJobs : orgJobs).filter(j => j._source === "external");
+
+  const providerCount = {};
+  sourceJobs.forEach(j => {
+    const p = getJobProvider(j);
+    if (!p) return;
+    providerCount[p] = (providerCount[p] || 0) + 1;
+  });
+
+  const providers = Object.keys(providerCount).sort((a, b) => providerCount[b] - providerCount[a]);
+
+  // Nothing to filter by — hide the row entirely
+  if (!providers.length) {
+    wrap.style.display = "none";
+    activeProviderFilter = "";
+    return;
+  }
+
+  wrap.style.display = "flex";
+
+  const totalExternal = sourceJobs.length;
+
+  function buildTabHTML(p) {
+    return `<button class="provider-tab${activeProviderFilter === p ? " active" : ""}" data-provider="${p}">
+      ${p}<span class="provider-count">${providerCount[p]}</span>
+    </button>`;
+  }
+
+  const allTabHTML = `<button class="provider-tab${activeProviderFilter === "" ? " active" : ""}" data-provider="">
+    All<span class="provider-count">${totalExternal}</span>
+  </button>`;
+
+  tabsRow.innerHTML = allTabHTML + providers.map(buildTabHTML).join("");
+
+  tabsRow.querySelectorAll(".provider-tab[data-provider]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      activeProviderFilter = btn.dataset.provider;
+      tabsRow.querySelectorAll(".provider-tab").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      renderRecruiterJobs();
+    });
+  });
+}
+
 async function initRecruiterJobsPage() {
   const titleEl = document.getElementById("jobsPageTitle");
   const tableEl = document.getElementById("jobsTable");
@@ -954,6 +1056,7 @@ async function initRecruiterJobsPage() {
       const btn = e.currentTarget;
       activeSourceFilter = btn.dataset.src || "";
       activeLocationTab  = "";
+      activeProviderFilter = "";
       // Toggle active class
       document.querySelectorAll(".src-tab").forEach(b => {
         b.classList.remove("active-all","active-int","active-ext");
@@ -963,6 +1066,7 @@ async function initRecruiterJobsPage() {
                 : "active-all";
       btn.classList.add(cls);
       populateLocationFilter();
+      populateProviderFilter();
       renderRecruiterJobs();
     });
   });
@@ -970,9 +1074,11 @@ async function initRecruiterJobsPage() {
   document.getElementById("myOrgBtn")?.addEventListener("click", () => {
     showAll = false;
     activeLocationTab = "";
+    activeProviderFilter = "";
     document.getElementById("myOrgBtn").classList.add("active");
     document.getElementById("allJobsBtn").classList.remove("active");
     populateLocationFilter();
+    populateProviderFilter();
     refreshSourceCounts();
     renderRecruiterJobs();
   });
@@ -980,9 +1086,11 @@ async function initRecruiterJobsPage() {
   document.getElementById("allJobsBtn")?.addEventListener("click", () => {
     showAll = true;
     activeLocationTab = "";
+    activeProviderFilter = "";
     document.getElementById("allJobsBtn").classList.add("active");
     document.getElementById("myOrgBtn").classList.remove("active");
     populateLocationFilter();
+    populateProviderFilter();
     renderRecruiterJobs();
   });
 

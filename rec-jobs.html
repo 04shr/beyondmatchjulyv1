@@ -102,6 +102,67 @@ a.modern-view-btn:hover {
 .loc-tab.active .loc-count {
   background: rgba(122,162,255,.3);
 }
+
+/* ── Provider tabs (external job source APIs, e.g. Adzuna) ── */
+.provider-tabs-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+  margin-bottom: 24px;
+}
+.provider-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  padding: 6px 14px; border-radius: 20px; cursor: pointer;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.1);
+  color: #8a9cc8;
+  transition: background .15s, border-color .15s, color .15s;
+  white-space: nowrap;
+}
+.provider-tab:hover {
+  background: rgba(122,162,255,.10);
+  border-color: rgba(122,162,255,.3);
+  color: #c5d3ff;
+}
+.provider-tab.active {
+  background: rgba(122,162,255,.18);
+  border-color: rgba(122,162,255,.45);
+  color: #7aa2ff;
+}
+.provider-tab .provider-count {
+  font-size: 10px; font-weight: 700;
+  background: rgba(122,162,255,.18);
+  color: #7aa2ff;
+  border-radius: 10px;
+  padding: 1px 6px;
+  line-height: 1.5;
+}
+.provider-tab.active .provider-count {
+  background: rgba(122,162,255,.3);
+}
+
+/* ── Force 3 cards per row so action buttons never get cut off ── */
+.jobs-grid-wrapper #jobsTable.jobs-grid {
+  display: grid !important;
+  grid-template-columns: repeat(3, 1fr) !important;
+  gap: 20px;
+}
+@media (max-width: 1100px) {
+  .jobs-grid-wrapper #jobsTable.jobs-grid { grid-template-columns: repeat(2, 1fr) !important; }
+}
+@media (max-width: 700px) {
+  .jobs-grid-wrapper #jobsTable.jobs-grid { grid-template-columns: 1fr !important; }
+}
+.job-modern-card {
+  min-width: 0; /* prevent grid blowout that was clipping the 4th column */
+}
+.job-modern-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 </style>
 </head>
 <body>
@@ -162,6 +223,12 @@ a.modern-view-btn:hover {
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:24px;">
     <span class="source-filter-label">Location:</span>
     <div id="locationTabsRow" class="location-tabs-row" style="margin-bottom:0;margin-top:0;flex:1;"></div>
+  </div>
+
+  <!-- PROVIDER TABS (external job source APIs, e.g. Adzuna) -->
+  <div id="providerTabsWrap" style="display:none;align-items:center;gap:8px;margin-bottom:24px;">
+    <span class="source-filter-label">Provider:</span>
+    <div id="providerTabsRow" class="provider-tabs-row" style="margin-bottom:0;margin-top:0;flex:1;"></div>
   </div>
 
   <!-- JOBS GRID -->

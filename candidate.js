@@ -374,6 +374,26 @@ function _showJobMatchSkeletons(grid, count = 8) {
    Fetches raw matches, enriches via Gemini, then renders.
    Also caches matched job IDs for LocateHire to consume.
 ========================================================= */
+// FIX: Single source of truth for "is this job internal (BeyondMatch-posted)
+// or external (job-board API)?". Previously this logic was duplicated in two
+// places (card-render branching + _applyClick) using only source/recruiter_id,
+// both of which go blank whenever the job_id lookup against allJobs misses —
+// that silently misclassified internal jobs as external and sent candidates
+// straight to the raw apply_url (a cand_actions.html link) instead of opening
+// the Quick Apply modal. job_type and the cand_actions.html URL pattern are
+// added as more reliable fallback signals.
+function isInternalJobCard(data) {
+  const source     = (data.source || "").toLowerCase();
+  const jobType     = (data.job_type || "").toLowerCase();
+  const applyUrl    = data.apply_url || "";
+  return (
+    source === "beyondmatch" ||
+    jobType === "internal" ||
+    (!source && !!data.recruiter_id) ||
+    applyUrl.includes("cand_actions.html")
+  );
+}
+
 async function loadCandidateJobMatches() {
   const select      = document.getElementById("candidateSelect");
   const candidateId = select?.value;
@@ -499,6 +519,12 @@ async function loadCandidateJobMatches() {
       // variation in casing, silently sending internal jobs down the external
       // link path and skipping applyToJob() entirely.
       source:       (job.source || match.source || "").toLowerCase(),
+      // FIX: `job_type` ("internal" / "external") is a more reliable signal than
+      // source/recruiter_id — those go blank whenever the job_id lookup in
+      // allJobs misses (e.g. match returned before /jobs cache refreshed), which
+      // was silently routing internal BeyondMatch jobs down the external
+      // window.open(apply_url) path instead of opening the Quick Apply modal.
+      job_type:     (job.job_type || match.job_type || "").toLowerCase(),
       recruiter_id: job.recruiter_id || match.recruiter_id || ""
     };
 
@@ -562,12 +588,13 @@ async function loadCandidateJobMatches() {
         ${aiInsight ? `<div class="match-insight">✦ ${aiInsight}</div>` : ""}
 
         <div class="match-actions">
-          ${(cardData.source === "beyondmatch" || (!cardData.source && !!cardData.recruiter_id))
-            // FIX: Also treat jobs with a recruiter_id but no source as internal.
-            // If the backend omits the source field entirely, the original strict
-            // equality check failed and the external-link button was rendered —
-            // that button has no data-apply-job attribute, so _applyClick()
-            // couldn't resolve jobId and logged "APPLY CLICKED undefined".
+          ${isInternalJobCard(cardData)
+            // FIX: Also treat jobs with a recruiter_id but no source as internal,
+            // and now also job_type === "internal" or a cand_actions.html apply_url
+            // — source/recruiter_id alone go blank whenever the job_id lookup in
+            // allJobs misses, which was silently routing internal BeyondMatch jobs
+            // to the external-link button (no data-apply-job attribute), so
+            // _applyClick() couldn't resolve jobId and logged "APPLY CLICKED undefined".
             ? `<button class="match-btn apply"
   data-apply-job="${cardData.job_id || cardData.id}"
   data-job-title="${cardData.title.replace(/"/g, '&quot;')}"
@@ -575,6 +602,7 @@ async function loadCandidateJobMatches() {
   data-firestore-id="${cardData.firestore_id || cardData.job_id || cardData.id}"
   data-candidate-id="${candidateId}"
   data-source="${cardData.source || ''}"
+  data-job-type="${cardData.job_type || ''}"
   data-company="${(cardData.company || '').replace(/"/g, '&quot;')}"
   data-apply-url="${(cardData.apply_url || '#').replace(/"/g, '&quot;')}"
   onclick="window._applyClick(this)">
