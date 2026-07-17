@@ -551,6 +551,22 @@ async function _handleSignup(email, password, role, orgName) {
       latest_candidate_id: null,
       createdAt:           serverTimestamp()
     }, { merge: true });
+
+    if (role === "recruiter") {
+
+    await fetch(`${API_BASE}/recruiters`, {
+        method: "POST",
+        headers: {
+            "Content-Type":"application/json"
+        },
+        body: JSON.stringify({
+            recruiter_id: uid,
+            email: email,
+            organisation_name: orgName
+        })
+    });
+
+}
   }
 
   showMessage("Account created successfully 🎉 Please login.", "success");

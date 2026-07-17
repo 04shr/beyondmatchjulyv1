@@ -868,12 +868,13 @@ window._applyClick = async function (btn) {
 
   const firestoreId = btn.dataset.firestoreId;
 
-  // FIX: Read source and apply_url from the card data so we can route
-  // external (API) jobs to their URL instead of opening the modal.
+  // FIX: Read source, job_type, and apply_url from the card data so we can
+  // route external (API) jobs to their URL instead of opening the modal.
   const cardData   = window.__jobCardData?.[jobId] || {};
-  const source     = (btn.dataset.source || cardData.source || "").toLowerCase();
-  const applyUrl   = btn.dataset.applyUrl || cardData.apply_url || "";
-  const company    = btn.dataset.company  || cardData.company   || "";
+  const source     = (btn.dataset.source   || cardData.source   || "").toLowerCase();
+  const jobType    = (btn.dataset.jobType  || cardData.job_type || "").toLowerCase();
+  const applyUrl   = btn.dataset.applyUrl  || cardData.apply_url || "";
+  const company    = btn.dataset.company   || cardData.company   || "";
 
 
   // FIX: Guard — if jobId is still undefined here don't proceed.
@@ -884,12 +885,16 @@ window._applyClick = async function (btn) {
     return;
   }
 
-  // FIX: Route external / API-sourced jobs to their external apply URL.
-  // A job is "internal" (BeyondMatch-posted) if:
-  //   • source === "beyondmatch", OR
-  //   • source is empty but a recruiterId is present (recruiter posted it without a source tag)
-  // Everything else is an external API job — open its URL directly.
-  const isInternal = source === "beyondmatch" || (!source && !!recruiterId);
+  // FIX: Use the shared isInternalJobCard() check (same logic used at render
+  // time) instead of the old source/recruiterId-only check. That old check
+  // went blank whenever the job_id lookup against allJobs missed, silently
+  // misclassifying internal BeyondMatch jobs as external and sending
+  // candidates straight to the raw apply_url (a cand_actions.html link)
+  // instead of opening the Quick Apply modal. job_type and the
+  // cand_actions.html URL pattern are now included as extra reliable signals.
+  const isInternal = isInternalJobCard({
+    source, job_type: jobType, recruiter_id: recruiterId, apply_url: applyUrl
+  });
 
   if (!isInternal) {
     // External job — redirect to the job board URL, don't open the modal.
