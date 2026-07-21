@@ -156,7 +156,7 @@ body {
 }
 
 .hero-content h1 {
-  font-size: 64px;
+  font-size: 46px;
   line-height: 1.1;
   font-weight: 800;
   margin-bottom: 24px;
@@ -176,6 +176,22 @@ body {
   line-height: 1.7;
   color: var(--text-muted);
   font-weight: 400;
+}
+
+.hero-image {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+}
+
+.hero-image img {
+    width: 100%;
+    max-width: 780px;
+    height: auto;
+    object-fit: contain;
+    filter: drop-shadow(0 30px 60px rgba(0,0,0,.45));
+    animation: float 6s ease-in-out infinite;
 }
 
 /* Match Preview Card */
