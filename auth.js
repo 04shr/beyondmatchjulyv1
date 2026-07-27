@@ -49,6 +49,12 @@ let _signupInProgress = false;
    GLOBAL AUTH STATE LISTENER
    Handles redirects, token expiry warnings, and missing
    candidate_id / recruiter_id backfills for existing accounts.
+
+   IMPORTANT: everything after the Firestore read is wrapped in
+   try/catch. Previously an uncaught error here (e.g. a bare
+   `uid` reference, or a Firestore permission error) would throw
+   inside this async callback and silently kill the redirect —
+   no error dialog, just nothing happening after login/signup.
 ========================================================= */
 onAuthStateChanged(auth, async (user) => {
   const path = window.location.pathname;
@@ -60,7 +66,7 @@ onAuthStateChanged(auth, async (user) => {
     return;
   }
 
-  // Warn when the session token is about to expire
+  // Warn when the session token is about to expire (only on non-index pages)
   if (!path.endsWith("index.html") && path !== "/") {
     try {
       const tokenResult = await user.getIdTokenResult();
@@ -69,58 +75,116 @@ onAuthStateChanged(auth, async (user) => {
         showToast("Session expiring soon — please save your work.", "warning");
       }
     } catch { /* non-critical — ignore */ }
+    return;
   }
 
-  if (!path.endsWith("index.html") && path !== "/") return;
-
-  // Wait for any in-progress signup Firestore writes before redirecting
+// Wait for any in-progress signup Firestore writes before redirecting
   if (_signupInProgress) {
     await new Promise(resolve => {
       const check = setInterval(() => {
         if (!_signupInProgress) { clearInterval(check); resolve(); }
       }, 100);
-      setTimeout(() => { clearInterval(check); resolve(); }, 5000);
+      setTimeout(() => { clearInterval(check); resolve(); }, 30000); // was 5000 — was cutting off slow signup writes
     });
   }
 
-  const snap     = await getDoc(doc(db, "users", user.uid));
-  const role     = snap.exists() ? snap.data().role     : "candidate";
-  const userData = snap.exists() ? snap.data()          : {};
+  console.log("=== AUTH REDIRECT: starting for uid:", user.uid, "===");
 
-  // Safety net: candidate signed up but candidate_id was never written
-  if (role === "candidate" && !userData.candidate_id) {
-    const fallbackId = `local_${user.uid}`;
-    try {
-      const existingCand = await getDoc(doc(db, "candidates", fallbackId));
-      if (!existingCand.exists()) {
-        await setDoc(doc(db, "candidates", fallbackId), {
-          candidate_id: fallbackId,
-          name:         user.email.split("@")[0],
-          email:        user.email,
-          user_id:      user.uid,
-          applied_role: "candidate",
-          resume_text:  "",
-          is_latest:    true,
-          createdAt:    serverTimestamp()
-        });
+  try {
+    const snap     = await getDoc(doc(db, "users", user.uid));
+    const role     = snap.exists() ? snap.data().role : "candidate";
+    const userData = snap.exists() ? snap.data() : {};
+
+    console.log("AUTH REDIRECT: snap.exists =", snap.exists(), "| role =", role, "| userData =", userData);
+
+    // Safety net: candidate signed up but candidate_id was never written
+    if (role === "candidate" && !userData.candidate_id) {
+      const fallbackId = `local_${user.uid}`;
+      try {
+        const existingCand = await getDoc(doc(db, "candidates", fallbackId));
+        if (!existingCand.exists()) {
+          await setDoc(doc(db, "candidates", fallbackId), {
+            candidate_id: fallbackId,
+            name:         user.email.split("@")[0],
+            email:        user.email,
+            user_id:      user.uid,
+            applied_role: "candidate",
+            resume_text:  "",
+            is_latest:    true,
+            createdAt:    serverTimestamp()
+          });
+        }
+        await setDoc(doc(db, "users", user.uid), {
+          candidate_id:        fallbackId,
+          latest_candidate_id: fallbackId
+        }, { merge: true });
+      } catch (backfillErr) {
+        console.error("AUTH REDIRECT: candidate backfill failed:", backfillErr);
+        /* best-effort backfill — don't block redirect on this */
       }
-      await setDoc(doc(db, "users", user.uid), {
-        candidate_id:        fallbackId,
-        latest_candidate_id: fallbackId
-      }, { merge: true });
-    } catch { /* best-effort backfill */ }
-  }
-
-  if (role === "recruiter") {
-    // Backfill recruiter_id for accounts created before this field existed
-    if (!userData.recruiter_id) {
-      try { await updateDoc(doc(db, "users", user.uid), { recruiter_id: user.uid }); } catch { }
     }
-    window.location.href = "/rec-dash.html";
-  } else if (role === "admin") {
-    window.location.href = "/admin.html";
-  } else {
-    window.location.href = "/candidate-dashboard.html";
+
+    let target;
+
+    if (role === "recruiter") {
+      // Backfill recruiter_id for accounts created before this field existed
+      if (!userData.recruiter_id) {
+        try {
+          await updateDoc(doc(db, "users", user.uid), { recruiter_id: user.uid });
+        } catch (e) {
+          console.error("AUTH REDIRECT: recruiter_id backfill failed:", e);
+        }
+      }
+      target = "/rec-dash.html";
+    } else if (role === "admin") {
+      target = "/admin.html";
+    } else if (!role) {
+      // SELF-HEAL: role is completely missing from this doc — the exact
+      // signature left by the old signup race condition, which wrote
+      // candidate_id fields but never got to write `role` before the
+      // page navigated away. A genuine candidate ALWAYS has
+      // role:"candidate" explicitly written, so `!role` only ever
+      // matches these corrupted accounts. Check DynamoDB — if this uid
+      // is a real recruiter there, repair Firestore and route correctly,
+      // automatically, with no manual fix needed per account.
+      console.log("AUTH REDIRECT: role missing — checking DynamoDB for self-heal, uid:", user.uid);
+      try {
+        const healRes = await fetch(`${API_BASE}/recruiters?recruiter_id=${encodeURIComponent(user.uid)}`);
+        if (healRes.ok) {
+          const healData = await healRes.json();
+          if (healData.status === "success" && healData.recruiter) {
+            console.log("AUTH REDIRECT: self-heal match found — repairing Firestore doc:", healData.recruiter);
+            await setDoc(doc(db, "users", user.uid), {
+              email:               healData.recruiter.email || user.email,
+              role:                "recruiter",
+              organisation_name:   healData.recruiter.organisation_name || null,
+              recruiter_id:        user.uid,
+              candidate_id:        null,
+              latest_candidate_id: null
+            }, { merge: true });
+            target = "/rec-dash.html";
+          }
+        }
+      } catch (healErr) {
+        console.error("AUTH REDIRECT: self-heal check failed:", healErr);
+      }
+
+      // Self-heal found nothing — this really is a candidate whose doc
+      // is incomplete (e.g. signup was interrupted). Fall back as before.
+      if (!target) target = "/candidate-dashboard.html";
+    } else {
+      target = "/candidate-dashboard.html";
+    }
+
+    console.log("AUTH REDIRECT: navigating to", target);
+    window.location.href = target;
+
+  } catch (err) {
+    console.error("=== AUTH REDIRECT FAILED — this is why the redirect didn't happen ===");
+    console.error(err);
+    if (window.showToast) {
+      showToast("Login succeeded but redirect failed. Please check the console or try refreshing.", "error");
+    }
   }
 });
 
@@ -447,10 +511,23 @@ async function _handleSignup(email, password, role, orgName) {
   const btn = document.querySelector(".auth-btn");
 
   const cred = await createUserWithEmailAndPassword(auth, email, password);
-  const uid  = cred.user.uid;
+  const uid  = cred.user.uid; // `uid` only exists in THIS function's scope
+
+  // CRITICAL: as soon as the account is created, Firebase fires
+  // onAuthStateChanged — which runs the redirect logic in this same file,
+  // on this same page (index.html), IN PARALLEL with the Firestore writes
+  // below. Without this flag, the redirect listener can read users/{uid}
+  // before role/org/recruiter_id are written, default to "candidate",
+  // and navigate away — which aborts this function mid-flight and
+  // permanently loses the recruiter/admin data. This flag makes the
+  // redirect listener wait for ALL signup writes (any role) to finish
+  // before it reads anything.
+  _signupInProgress = true;
 
   const fallbackCandidateId = role === "candidate" ? `local_${uid}` : null;
   const candidateName       = email.split("@")[0];
+
+  try {
 
   if (role === "candidate") {
     const inferredRole = inferRoleFromResume(_signupResumeText);
@@ -552,27 +629,53 @@ async function _handleSignup(email, password, role, orgName) {
       createdAt:           serverTimestamp()
     }, { merge: true });
 
-    if (role === "recruiter") {
+  if (role === "recruiter") {
+      const payload = {
+        recruiter_id: uid, // uid is in scope here — this is correct
+        email: email,
+        organisation_name: orgName
+      };
 
-    await fetch(`${API_BASE}/recruiters`, {
-        method: "POST",
-        headers: {
-            "Content-Type":"application/json"
-        },
-        body: JSON.stringify({
-            recruiter_id: uid,
-            email: email,
-            organisation_name: orgName
-        })
-    });
+      console.log("=== RECRUITER SIGNUP: sending to backend ===");
+      console.log("URL:", `${API_BASE}/recruiters`);
+      console.log("Payload:", payload);
 
-}
+      try {
+        const res = await fetch(`${API_BASE}/recruiters`, {
+          method:    "POST",
+          headers:   { "Content-Type": "application/json" },
+          body:      JSON.stringify(payload),
+          keepalive: true   // survives the redirect navigation that can fire mid-request
+        });
+
+        console.log("Recruiter API status:", res.status);
+        const rawText = await res.text();
+        console.log("Recruiter API raw response body:", rawText);
+
+        if (!res.ok) {
+          console.error("Recruiter backend call failed with status", res.status, rawText);
+        } else {
+          console.log("Recruiter backend call succeeded.");
+        }
+      } catch (err) {
+        console.error("Recruiter backend call threw an exception:", err);
+        /* non-fatal — Firestore write already succeeded above, so the
+           account still works; the backend record can be retried/backfilled */
+      }
+    }
   }
 
   showMessage("Account created successfully 🎉 Please login.", "success");
   authMode = "login";
   updateAuthUI();
   btn.disabled = false;
+
+  } finally {
+    // Guaranteed to run whether candidate, recruiter, or admin signup —
+    // and whether it succeeded or threw. This is what lets the redirect
+    // listener stop waiting and safely read the now-complete users/{uid} doc.
+    _signupInProgress = false;
+  }
 }
 
 
